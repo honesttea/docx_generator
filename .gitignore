@@ -1,0 +1,6 @@
+.DS_store
+*.docx
+mes4/
+teste/
+node_modules/
+conn.json
