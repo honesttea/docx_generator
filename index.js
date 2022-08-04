@@ -25,12 +25,12 @@ async function buffer_pgdf(result, template, cepnet, i){
     for(var j = 0; j < qtd_dividas;j++){
         valor_t += parseFloat(result.rows[i].debts[j].valor)
     }
-
+    console.log(formataDoc(result.rows[i].document));
     const buffer = await createReport ({
         template,
         data: {
             nome: result.rows[i].name,
-            document: result.rows[i].document,
+            document: formataDoc(result.rows[i].document),
             cep: result.rows[i].zip_code,
             bairro: result.rows[i].neighborhood,
             municipio: result.rows[i].city,
@@ -64,6 +64,7 @@ async function buffer_pgdf(result, template, cepnet, i){
 }
 
 async function buffer_dnit(result, template, cepnet, i){
+    console.log(formataCPF(result.rows[i][3].documento));
     const buffer = await createReport ({
         template,
         data: {
@@ -181,6 +182,18 @@ function mkdir(y){
     }
     count = x;
     return folder;
+}
+
+function formataDoc(doc){
+    if(doc.length === 11){
+        doc = doc.replace(/[^\d]/g, "");
+        return doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+    }
+    else{
+        doc = doc.replace(/[^\d]/g, "");
+        return doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+    }
+    
 }
 
 function generate_validation_digit(result){
