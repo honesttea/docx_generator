@@ -1,10 +1,12 @@
-import { createReport } from 'docx-templates';
-import fs from 'fs';
-import Client from 'pg';
-import JsBarcode from 'jsbarcode';
-import { Canvas } from "canvas"
-
+const { createReport } = require('docx-templates');
+const fs = require('fs');
+const Client = require('pg');
+const JsBarcode = require('jsbarcode');
+const { Canvas } = require("canvas")
 const conn = require("./conn.json");
+// const { Console } = require('console');
+
+var count = 0;
 
 function create_automation(){
     const folder = 'mes4/todos';
@@ -19,56 +21,51 @@ function create_automation(){
     fs.writeFileSync('mes4/test.sh', data)
 }
 
-async function generate_barcode( codigo, format ){
-    var canvas = new Canvas(600,200, "image")
-    JsBarcode( canvas , codigo, {format:`${format}`,displayValue:false, margin:0});
-    const ret = canvas.toBuffer()
-    // console.log(data)
-    return ret;
+async function buffer_pgdf(result, template, cepnet, i){
+    var qtd_dividas = result.rows[i].debts.length;
+    var valor_t = 0;
+    for(var j = 0; j < qtd_dividas;j++){
+        valor_t += parseFloat(result.rows[i].debts[j].valor)
+    }
+
+    const buffer = await createReport ({
+        template,
+        data: {
+            nome: result.rows[i].name,
+            document: result.rows[i].document,
+            cep: result.rows[i].zip_code,
+            bairro: result.rows[i].neighborhood,
+            municipio: result.rows[i].city,
+            descricaoEndereco: result.rows[i].street,
+            numeroEndereco:result.rows[i].number,
+            complementoEndereco:result.rows[i].complement, 
+            uf: result.rows[i].uf,
+            url_seec: result.rows[i].extra.url_seec,
+            url_pgdf: result.rows[i].extra.url_pgdf,
+            codigo_validacao: result.rows[i].extra.codigo_validacao,
+            debts: result.rows[i].debts,
+            cepnet: cepnet,
+            cedo:"29183928391000001920931020000283",
+            qtd_titulos: qtd_dividas,
+            valor_total: Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor_t),
+            data_quitacao: result.rows[i].negatived_at,
+            numero_comunicado: "092109390123"//result.rows[i].communicated_number
+        },
+            additionalJsContext: {
+                cif: async () => {
+                  const data = await generate_barcode(result.rows[i].cedo,"CODE128C");
+                  return { width: 6, height: 1, data, extension: '.png' };
+                },
+                cedo_bar: async () => {
+                  const data = await generate_barcode("29183928391000001920931020000283","CODE128A");
+                  return { width: 12 , height: 2, data, extension: '.png' };
+                }
+              }
+    })
+    return buffer;
 }
 
-
-async function generate_datamatrix_code(result){
-    const cep_destinatario = result.rows[i][2].cep.match(/\d/g);
-    const numero_destinatario = result.rows[i][2].numeroEndereco.padStart(5,'0');
-    const cep_remetente = "70210010";
-    const numero_remetente = '00001';
-    const digito_verificador = ()=>{
-
-        return 
-    } ;
-    const data = cep_destinatario + numero_destinatario + cep_remetente + numero_remetente;
-    return data;
-}
-
-var count = 0;
-
-async function generate_pdf(){
-  const client = new Client.Client({
-      user: conn.user,
-      host: conn.host,
-      password: conn.password,
-      database: conn.database,
-      port: conn.port,
-    })
-   client.connect()
-    const result = await client.query({
-        rowMode: 'array',
-        text: "SELECT id_form, cedo, destinatario, dados_especificos, debitos FROM dnit.carta_correios cc WHERE month_year = '03-2022' LIMIT 2",
-    })
-    await client.end()
-    var folder;
-    var x = 1;
-
-    for(var i = 0;i < result.rows.length;i++){
-        if(i%500 === 0){
-            folder = `mes4/p_${x}`;
-            if (!fs.existsSync(folder)) {
-                fs.mkdirSync(folder);
-                x+=1;
-            }
-        }
-    const template = fs.readFileSync(`matriz_${result.rows[i][0]}.docx`);
+async function buffer_dnit(result, template, cepnet, i){
     const buffer = await createReport ({
         template,
         data: {
@@ -154,7 +151,8 @@ async function generate_pdf(){
             "descricaoEndereco": result.rows[i][2].descricaoEndereco,
             "complementoEndereco": result.rows[i][2].complementoEndereco,
             "cedo":result.rows[i][1], 
-            "num_comunicado": result.rows[i][3].num_comunicado
+            "num_comunicado": result.rows[i][3].num_comunicado,
+            "cepnet":cepnet
           },
           additionalJsContext: {
             cif: async () => {
@@ -162,17 +160,127 @@ async function generate_pdf(){
               return { width: 6, height: 1, data, extension: '.png' };
             },
             cedo_bar: async () => {
-              const data = await generate_barcode(result.rows[i][1],"CODE128A")
+              const data = await generate_barcode(result.rows[i][1],"CODE128A");
               return { width: 12 , height: 2, data, extension: '.png' };
             }
           }
         }
       );
-      fs.writeFileSync(`${folder}/${result.rows[i][1]}.docx`, buffer)
-      count = x;
-  }
+      return buffer;
 }
 
-await generate_pdf();
+function mkdir(y){
+    var folder;
+    var x = 1;
+    for(var i = 0;i < y;i++){
+        if(i%500 === 0){
+            folder = `mes4/p_${x}`;
+            if (!fs.existsSync(folder)) {
+                fs.mkdirSync(folder);
+                x+=1;
+            }
+        }
+    }
+    count = x;
+    return folder;
+}
+
+function generate_validation_digit(result){
+    const cep = result.match(/\d/g)
+    var digit = 0;
+    var cepnet = 0; 
+    // console.log(cep)
+    for(var i = 0;i<cep.length;i++){
+        cepnet += parseInt(cep[i]);
+    }
+    const validacao = Math.ceil((cepnet/10))*10
+    digit = validacao - cepnet
+    // console.log(digit+ " = "+ validacao +" - "+ cepnet)
+    // console.log(digit.toString())
+    return digit.toString()
+}
+
+function create_postnet_code(result){
+    var postnet_table = [ 'AATTT', 'TTTAA', 'TTATA', 'TTAAT', 'TATTA', 'TATAT',
+   'TAATT', 'ATTTA', 'ATTAT', 'ATATT' ]
+   digito = generate_validation_digit(result)
+   const cep = result.match(/\d/g)
+//    console.log(cep)
+   var cepnet = "";
+   for(var i = 0;i<cep.length;i++){
+        cepnet = cepnet+postnet_table[parseInt(cep[i])];
+   }
+   cepnet = cepnet+postnet_table[parseInt(digito)]
+   return cepnet;
+}
+
+async function generate_barcode( codigo, format ){
+    var canvas = new Canvas(600,200, "image")
+    JsBarcode( canvas , codigo, {format:`${format}`,displayValue:false, margin:0});
+    const ret = await canvas.toBuffer()
+    // console.log(data)
+    return ret;
+}
+
+
+async function generate_datamatrix_code(result){
+    const cep_destinatario = result.rows[i][2].cep.match(/\d/g);
+    const numero_destinatario = result.rows[i][2].numeroEndereco.padStart(5,'0');
+    const cep_remetente = "70210010";
+    const numero_remetente = '00001';
+    const data = cep_destinatario + numero_destinatario + cep_remetente + numero_remetente;
+    // return data;
+    // console.log(digito_verificador)
+}
+
+async function connect(){
+    const client = new Client.Client({
+        user: conn.user,
+        host: conn.host,
+        password: conn.password,
+        database: conn.database,
+        port: conn.port,
+    })
+    client.connect()
+    const result = await client.query({
+        // rowMode: 'array',
+        text:"SELECT c.*, to_char((n.created_at + INTERVAL '20 days'), 'DD/MM/YYYY') as negatived_at, n.communicated_number,n.extra_params as extra FROM pgdf_homolog.communications c INNER JOIN pgdf_homolog.negativations n ON c.document = n.document"
+        // text: "SELECT id_form, cedo, destinatario, dados_especificos, debitos FROM dnit.carta_correios cc WHERE month_year = '03-2022' LIMIT 2",
+    })
+    client.end()
+    return result;
+}
+
+async function generate_pdf(templ){
+    // if(templ = "dnit"){
+    //     const result = await connect()
+    //     const rows = result.rows.length;
+    //     var folder = mkdir(rows);
+    //     for(var i = 0;i < rows;i++){
+    //         const template = fs.readFileSync(`matriz_${result.rows[i][0]}.docx`);
+    //         const cepnet = create_postnet_code("03272-030")
+    //         const buffer = await buffer_dnit(result,template,cepnet,i);
+    //         fs.writeFileSync(`${folder}/${result.rows[i][1]}.docx`, buffer)
+    //     }
+    // }
+    if(templ = "pgdf"){
+
+        const result = await connect()
+        const rows = result.rows.length;
+        var folder = mkdir(rows);
+        // console.log(Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(result.rows[0].debts[0].valor))
+
+        // console.log(result.rows[0].extra_params.url_pgdf)
+        for(var i = 0;i < rows;i++){
+            const template = fs.readFileSync(`matriz_pg_${result.rows[i].model}.docx`);
+            const cepnet = create_postnet_code(result.rows[i].zip_code)
+            const buffer = await buffer_pgdf(result,template,cepnet,i);
+            fs.writeFileSync(`${folder}/${result.rows[i].name}.docx`, buffer)
+        }
+    }
+}
+
+generate_pdf("pgdf");
 create_automation();
+
 
