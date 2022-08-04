@@ -4,8 +4,6 @@ const Client = require('pg');
 const JsBarcode = require('jsbarcode');
 const { Canvas } = require("canvas")
 const conn = require("./conn.json");
-// const { Console } = require('console');
-
 var count = 0;
 
 function create_automation(){
@@ -189,14 +187,11 @@ function generate_validation_digit(result){
     const cep = result.match(/\d/g)
     var digit = 0;
     var cepnet = 0; 
-    // console.log(cep)
     for(var i = 0;i<cep.length;i++){
         cepnet += parseInt(cep[i]);
     }
     const validacao = Math.ceil((cepnet/10))*10
     digit = validacao - cepnet
-    // console.log(digit+ " = "+ validacao +" - "+ cepnet)
-    // console.log(digit.toString())
     return digit.toString()
 }
 
@@ -205,7 +200,6 @@ function create_postnet_code(result){
    'TAATT', 'ATTTA', 'ATTAT', 'ATATT' ]
    digito = generate_validation_digit(result)
    const cep = result.match(/\d/g)
-//    console.log(cep)
    var cepnet = "";
    for(var i = 0;i<cep.length;i++){
         cepnet = cepnet+postnet_table[parseInt(cep[i])];
@@ -218,10 +212,8 @@ async function generate_barcode( codigo, format ){
     var canvas = new Canvas(600,200, "image")
     JsBarcode( canvas , codigo, {format:`${format}`,displayValue:false, margin:0});
     const ret = await canvas.toBuffer()
-    // console.log(data)
     return ret;
 }
-
 
 async function generate_datamatrix_code(result){
     const cep_destinatario = result.rows[i][2].cep.match(/\d/g);
@@ -229,8 +221,7 @@ async function generate_datamatrix_code(result){
     const cep_remetente = "70210010";
     const numero_remetente = '00001';
     const data = cep_destinatario + numero_destinatario + cep_remetente + numero_remetente;
-    // return data;
-    // console.log(digito_verificador)
+    return data;
 }
 
 async function connect(){
@@ -243,7 +234,6 @@ async function connect(){
     })
     client.connect()
     const result = await client.query({
-        // rowMode: 'array',
         text:"SELECT c.*, to_char((n.created_at + INTERVAL '20 days'), 'DD/MM/YYYY') as negatived_at, n.communicated_number,n.extra_params as extra FROM pgdf_homolog.communications c INNER JOIN pgdf_homolog.negativations n ON c.document = n.document"
         // text: "SELECT id_form, cedo, destinatario, dados_especificos, debitos FROM dnit.carta_correios cc WHERE month_year = '03-2022' LIMIT 2",
     })
@@ -252,25 +242,21 @@ async function connect(){
 }
 
 async function generate_pdf(templ){
-    // if(templ = "dnit"){
-    //     const result = await connect()
-    //     const rows = result.rows.length;
-    //     var folder = mkdir(rows);
-    //     for(var i = 0;i < rows;i++){
-    //         const template = fs.readFileSync(`matriz_${result.rows[i][0]}.docx`);
-    //         const cepnet = create_postnet_code("03272-030")
-    //         const buffer = await buffer_dnit(result,template,cepnet,i);
-    //         fs.writeFileSync(`${folder}/${result.rows[i][1]}.docx`, buffer)
-    //     }
-    // }
-    if(templ = "pgdf"){
-
+    if(templ === "dnit"){
         const result = await connect()
         const rows = result.rows.length;
         var folder = mkdir(rows);
-        // console.log(Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(result.rows[0].debts[0].valor))
-
-        // console.log(result.rows[0].extra_params.url_pgdf)
+        for(var i = 0;i < rows;i++){
+            const template = fs.readFileSync(`matriz_${result.rows[i][0]}.docx`);
+            const cepnet = create_postnet_code("03272-030")
+            const buffer = await buffer_dnit(result,template,cepnet,i);
+            fs.writeFileSync(`${folder}/${result.rows[i][1]}.docx`, buffer)
+        }
+    }
+    if(templ === "pgdf"){
+        const result = await connect()
+        const rows = result.rows.length;
+        var folder = mkdir(rows);
         for(var i = 0;i < rows;i++){
             const template = fs.readFileSync(`matriz_pg_${result.rows[i].model}.docx`);
             const cepnet = create_postnet_code(result.rows[i].zip_code)
@@ -282,5 +268,3 @@ async function generate_pdf(templ){
 
 generate_pdf("pgdf");
 create_automation();
-
-
