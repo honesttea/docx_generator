@@ -16,6 +16,8 @@ function create_automation(){
     for counter in {1..${count}}
     do
         docx2pdf p_$counter todos
+        sleep 10 
+        kill $(ps aux | grep 'Microsoft Word' | awk '{print $2}')
     done`
     fs.writeFileSync('documentos/test.sh', data)
 }
